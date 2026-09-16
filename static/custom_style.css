@@ -16,4 +16,42 @@ footer {
   text-align: center;
 }
 
+/* Design Claim (Contribution): status badges shown next to usernames */
+.badge-pill {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.25em 0.6em;
+  border-radius: 1rem;
+  vertical-align: middle;
+  color: #fff;
+  margin-left: 0.4rem;
+}
+.badge-newcomer    { background-color: #adb5bd; }
+.badge-contributor { background-color: #0d6efd; }
+.badge-active      { background-color: #6f42c1; }
+.badge-pillar      { background-color: #d4af37; color: #3a2e00; }
+
+/* Design Claim (Commitment): "recent activity from people you follow" widget */
+.activity-widget-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* Design Claim (Contribution): leaderboard rank styling */
+.leaderboard-rank {
+  font-size: 1.1rem;
+  font-weight: 700;
+  width: 2rem;
+  text-align: center;
+}
+
 

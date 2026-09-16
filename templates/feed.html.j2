@@ -22,6 +22,38 @@
 </div>
 {% endif %}
 
+{% if session.get('user_id') %}
+<!-- Design Claim (Commitment): "Displaying photos and information about
+     individual members and their recent activities will promote bond-based
+     commitment." Shows recent posts from people the user follows to
+     encourage them to check in and stay engaged. -->
+<div class="col-md-8 mx-auto mb-4">
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <h5 class="card-title">People you follow</h5>
+      {% if following_count == 0 %}
+        <p class="text-muted mb-0">You're not following anyone yet. Follow other users to see their activity here.</p>
+      {% elif followed_activity %}
+        {% for activity in followed_activity %}
+        <div class="d-flex align-items-center mb-2">
+          <div class="activity-widget-avatar me-2" style="background-color: {{ loop_color(activity.user_id) }};">
+            {{ activity.username[0]|upper }}
+          </div>
+          <div>
+            <a href="/u/{{ activity.username }}" class="fw-bold text-decoration-none">{{ activity.username }}</a>
+            <span class="text-muted small">{{ activity.created_at|datetimeformat }}</span>
+            <p class="mb-0 small">{{ activity.content|truncate(80, True, '...') }}</p>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="text-muted mb-0">No recent posts from people you follow yet.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <h2 class="text-center border-bottom pb-2 mb-4"><span>Posts</span></h2>
 
 <div class="mb-4 text-center">

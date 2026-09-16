@@ -9,7 +9,10 @@
     <div class="row g-0 align-items-center">
       <div class="col-md-12">
         <div class="card-body">
-          <h2 class="card-title">{{ user_display(user.username) }}</h2>
+          <h2 class="card-title">
+            {{ user_display(user.username) }}
+            <span class="badge-pill {{ badge_class }}" title="Earned by making {{ post_count }} post(s)">{{ badge_name }}</span>
+          </h2>
           <p class="card-text text-muted mb-3">
             <strong>Location:</strong> {{ user.location or "N/A" }}<br>
             <strong>Birthdate:</strong> {{ user.birthdate or "N/A" }}<br>

@@ -94,6 +94,26 @@ REACTION_EMOJIS = {
 }
 REACTION_TYPES = list(REACTION_EMOJIS.keys())
 
+# ----- Design Claim: Contribution / Feedback & Rewards -----
+# "Rewards, whether in the form of status, privileges, or material benefits,
+#  will motivate contributions." (Kraut & Resnick, Ch. 2)
+# Post-count based status badges. Ordered from highest threshold to lowest so
+# the loop below returns the first (highest) tier a user qualifies for.
+BADGE_TIERS = [
+    (50, 'Community Pillar', 'badge-pillar'),
+    (20, 'Active Member', 'badge-active'),
+    (5, 'Contributor', 'badge-contributor'),
+    (0, 'Newcomer', 'badge-newcomer'),
+]
+
+
+def get_user_badge(post_count):
+    """Returns (badge_name, css_class) for a given number of posts a user has made."""
+    for threshold, name, css_class in BADGE_TIERS:
+        if post_count >= threshold:
+            return name, css_class
+    return 'Newcomer', 'badge-newcomer'
+
 
 @app.route('/')
 def feed():
@@ -191,6 +211,31 @@ def feed():
             'comments': comments_moderated
         })
 
+    #  3b. Design Claim (Commitment): "Displaying photos and information about
+    #  individual members and their recent activities will promote bond-based
+    #  commitment." (Kraut & Resnick, Ch. 3)
+    #  Show a small widget with the latest posts from people the user follows,
+    #  independent of the sort/filter above, to remind them to check in.
+    followed_activity = []
+    following_count = 0
+    if current_user_id:
+        following_count = query_db(
+            'SELECT COUNT(*) as cnt FROM follows WHERE follower_id = ?',
+            (current_user_id,), one=True
+        )['cnt']
+        activity_raw = query_db('''
+            SELECT p.id, p.content, p.created_at, u.username, u.id as user_id
+            FROM posts p
+            JOIN users u ON p.user_id = u.id
+            WHERE p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?)
+            ORDER BY p.created_at DESC
+            LIMIT 5
+        ''', (current_user_id,))
+        for activity_post in activity_raw:
+            activity_dict = dict(activity_post)
+            activity_dict['content'], _ = moderate_content(activity_dict['content'])
+            followed_activity.append(activity_dict)
+
     #  4. Render Template with Pagination Info 
     return render_template('feed.html.j2', 
                            posts=posts_data, 
@@ -199,7 +244,9 @@ def feed():
                            page=page, # Pass current page number
                            per_page=POSTS_PER_PAGE, # Pass items per page
                            reaction_emojis=REACTION_EMOJIS,
-                           reaction_types=REACTION_TYPES)
+                           reaction_types=REACTION_TYPES,
+                           followed_activity=followed_activity,
+                           following_count=following_count)
 
 @app.route('/posts/new', methods=['POST'])
 def add_post():
@@ -299,6 +346,10 @@ def user_profile(username):
     followers_count = query_db('SELECT COUNT(*) as cnt FROM follows WHERE followed_id = ?', (user['id'],), one=True)['cnt']
     following_count = query_db('SELECT COUNT(*) as cnt FROM follows WHERE follower_id = ?', (user['id'],), one=True)['cnt']
 
+    # Design Claim (Contribution): status badge based on how many posts this user has made
+    post_count = len(posts)
+    badge_name, badge_class = get_user_badge(post_count)
+
     #  NEW: CHECK FOLLOW STATUS 
     is_currently_following = False # Default to False
     current_user_id = session.get('user_id')
@@ -320,7 +371,10 @@ def user_profile(username):
                            comments=comments,
                            followers_count=followers_count, 
                            following_count=following_count,
-                           is_following=is_currently_following)
+                           is_following=is_currently_following,
+                           post_count=post_count,
+                           badge_name=badge_name,
+                           badge_class=badge_class)
     
 
 @app.route('/u/<username>/followers')
@@ -855,6 +909,42 @@ def admin_delete_comment(comment_id):
 @app.route('/rules')
 def rules():
     return render_template('rules.html.j2')
+
+
+@app.route('/leaderboard')
+def leaderboard():
+    """
+    Design Claim (Contribution / Feedback & Rewards): "Comparative performance
+    feedback can enhance motivation, as long as high-performance is viewed as
+    desirable and potentially obtainable." (Kraut & Resnick, Ch. 2)
+
+    Ranks users by number of posts, then by total reactions received on
+    those posts, and shows their status badge.
+    """
+    rows = query_db('''
+        SELECT u.id, u.username,
+               COUNT(DISTINCT p.id) as post_count,
+               COUNT(r.id) as reaction_count
+        FROM users u
+        LEFT JOIN posts p ON p.user_id = u.id
+        LEFT JOIN reactions r ON r.post_id = p.id
+        GROUP BY u.id
+        HAVING post_count > 0
+        ORDER BY post_count DESC, reaction_count DESC
+        LIMIT 10
+    ''')
+
+    leaders = []
+    for row in rows:
+        leader = dict(row)
+        badge_name, badge_class = get_user_badge(leader['post_count'])
+        leader['badge_name'] = badge_name
+        leader['badge_class'] = badge_class
+        leaders.append(leader)
+
+    return render_template('leaderboard.html.j2',
+                           leaders=leaders,
+                           current_user_id=session.get('user_id'))
 
 @app.template_global()
 def loop_color(user_id):

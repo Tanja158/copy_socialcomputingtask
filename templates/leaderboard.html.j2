@@ -1,0 +1,30 @@
+{% extends "base.html.j2" %}
+{% block content %}
+{% from "macros/user_macros.html.j2" import user_display %}
+
+<h2 class="text-center border-bottom pb-2 mb-4"><span>Leaderboard</span></h2>
+<p class="text-center text-muted mb-4">The most active contributors, ranked by posts and reactions received.</p>
+
+<div class="col-md-8 mx-auto">
+  <div class="card shadow-sm">
+    <ul class="list-group list-group-flush">
+      {% for leader in leaders %}
+      <li class="list-group-item d-flex align-items-center {% if leader.id == current_user_id %}bg-light{% endif %}">
+        <div class="leaderboard-rank me-3">{{ loop.index }}</div>
+        <div class="flex-grow-1">
+          <a href="/u/{{ leader.username }}" class="text-decoration-none fw-bold">{{ user_display(leader.username) }}</a>
+          <span class="badge-pill {{ leader.badge_class }}">{{ leader.badge_name }}</span>
+        </div>
+        <div class="text-muted small text-end">
+          {{ leader.post_count }} post{{ 's' if leader.post_count != 1 else '' }}<br>
+          {{ leader.reaction_count }} reaction{{ 's' if leader.reaction_count != 1 else '' }}
+        </div>
+      </li>
+      {% else %}
+      <li class="list-group-item text-center text-muted">No contributions yet.</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+{% endblock %}
