@@ -32,6 +32,17 @@
                 onclick="window.location.href = '{{ url_for('admin_dashboard', tab='comments', comments_page=comments_page) }}'">
             Comments
         </button>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if current_tab == 'appeals' %}active{% endif %}" 
+                id="appeals-tab" data-bs-toggle="tab" data-bs-target="#appeals" 
+                type="button" role="tab" aria-controls="appeals" 
+                aria-selected="{% if current_tab == 'appeals' %}true{% else %}false{% endif %}"
+                onclick="window.location.href = '{{ url_for('admin_dashboard', tab='appeals') }}'">
+            Appeals
+            {% if pending_appeals_count > 0 %}
+            <span class="badge bg-danger ms-1">{{ pending_appeals_count }}</span>
+            {% endif %}
+        </button>
     </li>
 </ul>
 
@@ -208,9 +219,74 @@
             <span class="mx-3 text-muted">Page {{ comments_page }} of {{ total_comments_pages }}</span>
             <a href="{{ url_for('admin_dashboard', tab='comments', comments_page=comments_page+1) }}"
               class="btn btn-primary {% if not comments_has_next %}btn-light disabled{% endif %}">
-              Next &raquo;
+                            Next &raquo;
             </a>
         </div>
+    </div>
+
+    <!-- Appeals Tab (Design Claim Ch. 4: appeal procedures) -->
+    <div class="tab-pane fade {% if current_tab == 'appeals' %}show active{% endif %}" id="appeals" role="tabpanel" aria-labelledby="appeals-tab">
+        <p class="text-muted">
+            Users can contest automated moderation decisions here. Reviewing each appeal
+            consistently and giving a written reason makes moderation decisions more legitimate.
+        </p>
+        {% for appeal in appeals %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <h6 class="mb-0">
+                        Appeal #{{ appeal.id }} by
+                        <a href="{{ url_for('user_profile', username=appeal.username) }}">{{ appeal.username }}</a>
+                        &middot; {{ appeal.content_type }} {{ appeal.content_id }}
+                    </h6>
+                    {% if appeal.status == 'approved' %}
+                        <span class="badge bg-success">Approved</span>
+                    {% elif appeal.status == 'rejected' %}
+                        <span class="badge bg-danger">Rejected</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Pending</span>
+                    {% endif %}
+                </div>
+
+                <p class="mb-1 small"><strong>Original content:</strong></p>
+                <p class="border-start border-3 ps-2 small text-muted">{{ appeal.original_content }}</p>
+
+                <p class="mb-1 small">
+                    <strong>Automated decision:</strong>
+                    <span class="text-muted">{{ appeal.moderated_content }} (score {{ appeal.content_score }})</span>
+                </p>
+
+                <p class="mb-1 small"><strong>User's argument:</strong></p>
+                <p class="border-start border-3 ps-2 small">{{ appeal.reason }}</p>
+
+                {% if appeal.admin_response %}
+                <p class="mb-1 small"><strong>Moderator's reason:</strong></p>
+                <p class="border-start border-3 border-primary ps-2 small">{{ appeal.admin_response }}</p>
+                {% endif %}
+
+                {% if appeal.status == 'pending' %}
+                <div class="row g-2 mt-2">
+                    <div class="col-md-8">
+                        <form action="{{ url_for('resolve_appeal', appeal_id=appeal.id, decision='approved') }}" method="POST" class="d-flex gap-2">
+                            <input type="text" class="form-control form-control-sm" name="admin_response" placeholder="Reason for your decision (shown to the user)">
+                            <button type="submit" class="btn btn-sm btn-success text-nowrap">Approve</button>
+                        </form>
+                    </div>
+                    <div class="col-md-4">
+                        <form action="{{ url_for('resolve_appeal', appeal_id=appeal.id, decision='rejected') }}" method="POST" class="d-flex gap-2">
+                            <input type="text" class="form-control form-control-sm" name="admin_response" placeholder="Reason">
+                            <button type="submit" class="btn btn-sm btn-danger text-nowrap">Reject</button>
+                        </form>
+                    </div>
+                </div>
+                {% endif %}
+
+                <small class="text-muted d-block mt-2">Submitted {{ appeal.created_at|datetimeformat }}</small>
+            </div>
+        </div>
+        {% else %}
+        <p class="text-center text-muted">No appeals have been submitted.</p>
+        {% endfor %}
     </div>
 </div>
 

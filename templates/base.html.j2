@@ -43,6 +43,12 @@
         <li class="nav-item">
           <a class="nav-link" href="/rules">Rules</a>
         </li>
+        <!-- Admin-only link to the moderation dashboard -->
+        {% if session.get('username') == 'admin' %}
+        <li class="nav-item">
+          <a class="nav-link text-danger fw-bold" href="{{ url_for('admin_dashboard') }}">Admin</a>
+        </li>
+        {% endif %}
         <li class="nav-item">
           <a class="nav-link" href="{{ url_for('leaderboard') }}">Leaderboard</a>
         </li>
@@ -61,6 +67,8 @@
             <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarUserDropdown">
               <!-- Link to user's profile page -->
               <li><a class="dropdown-item" href="{{ url_for('user_profile', username=session.get('username')) }}">My Profile</a></li>
+              <!-- Design Claim (Ch. 4): users can track their moderation appeals -->
+              <li><a class="dropdown-item" href="{{ url_for('my_appeals') }}">My Appeals</a></li>
               <li><hr class="dropdown-divider"></li>
               <li><a class="dropdown-item" href="/logout">Logout</a></li>
             </ul>

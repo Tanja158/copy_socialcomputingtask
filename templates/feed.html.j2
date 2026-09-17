@@ -108,7 +108,25 @@
         {% endif %}
       </div>
       
-      <p class="mt-2">{{ entry.post.content }}</p>
+            <p class="mt-2">{{ entry.post.content }}</p>
+
+      {# Design Claim (Ch. 4): the author of censored content is offered a formal
+         appeal procedure, so moderation feels like a process they can contest. #}
+      {% if entry.post.was_censored and session.get('user_id') == entry.post.user_id %}
+        {% if entry.post.has_appeal %}
+          <div class="alert alert-secondary py-2 small mb-2">
+            This content was moderated. Your appeal is <strong>{{ entry.post.has_appeal }}</strong> &mdash;
+            <a href="{{ url_for('my_appeals') }}">view your appeals</a>.
+          </div>
+        {% else %}
+          <div class="alert alert-warning py-2 small mb-2">
+            This content was moderated automatically.
+            <button class="btn btn-sm btn-outline-dark ms-2" data-bs-toggle="modal" data-bs-target="#appealModal-post-{{ entry.post.id }}">
+              Appeal this decision
+            </button>
+          </div>
+        {% endif %}
+      {% endif %}
 
       <!-- Reactions Display and Add Reaction Button -->
       <div class="d-flex align-items-center mt-2 mb-2">
@@ -194,7 +212,33 @@
       </div>
     </div>
   </div>
-  
+
+  {# Design Claim (Ch. 4): appeal dialog where the user argues their case #}
+  {% if entry.post.was_censored and session.get('user_id') == entry.post.user_id and not entry.post.has_appeal %}
+  <div class="modal fade" id="appealModal-post-{{ entry.post.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Appeal a moderation decision</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted">
+            Explain why you believe this moderation decision was incorrect. A moderator
+            will review your appeal and respond with a written reason.
+          </p>
+          <form action="{{ url_for('submit_appeal', content_type='post', content_id=entry.post.id) }}" method="POST">
+            <div class="mb-3">
+              <label for="appeal-reason-{{ entry.post.id }}" class="form-label">Your argument</label>
+              <textarea class="form-control" id="appeal-reason-{{ entry.post.id }}" name="reason" rows="3" required></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Submit appeal</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %} 
 
   <div class="modal fade" id="addCommentModal-{{ entry.post.id }}" tabindex="-1" aria-labelledby="addCommentModalLabel-{{ entry.post.id }}" aria-hidden="true">
     <div class="modal-dialog">

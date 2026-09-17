@@ -27,6 +27,18 @@ TIER1_WORDS = MODERATION_CONFIG['categories']['tier1_severe_violations']['words'
 TIER2_PHRASES = MODERATION_CONFIG['categories']['tier2_spam_scams']['phrases']
 TIER3_WORDS = MODERATION_CONFIG['categories']['tier3_mild_profanity']['words']
 
+# Performance: instead of running one regex per word on every text, all words of
+# a tier are compiled into a single pattern once at startup. Longest entries come
+# first so overlapping entries still match their longest form.
+def _build_tier_pattern(words):
+    ordered = sorted(words, key=len, reverse=True)
+    return re.compile(r'\b(?:' + '|'.join(re.escape(w) for w in ordered) + r')\b', re.IGNORECASE)
+
+TIER1_PATTERN = _build_tier_pattern(TIER1_WORDS)
+TIER2_PATTERN = _build_tier_pattern(TIER2_PHRASES)
+TIER3_PATTERN = _build_tier_pattern(TIER3_WORDS)
+URL_PATTERN = re.compile(r'(?:https?://|www\.)\S+', re.IGNORECASE)
+
 def get_db():
     """
     Connect to the application's configured database. The connection
@@ -197,12 +209,21 @@ def feed():
         reactions = query_db('SELECT reaction_type, COUNT(*) as count FROM reactions WHERE post_id = ? GROUP BY reaction_type', (post['id'],))
         comments_raw = query_db('SELECT c.id, c.content, c.created_at, u.username, u.id as user_id FROM comments c JOIN users u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at ASC', (post['id'],))
         post_dict = dict(post)
-        post_dict['content'], _ = moderate_content(post_dict['content'])
+        original_post_content = post_dict['content']
+        # Design Claim (Ch. 4): approved appeals override the moderation decision
+        post_dict['content'], _ = moderate_with_appeal(original_post_content, 'post', post_dict['id'])
+        # Flag censored content so the author can be offered an appeal option
+        post_dict['was_censored'] = (post_dict['content'] != original_post_content)
+        post_dict['has_appeal'] = has_appeal('post', post_dict['id'])
         comments_moderated = []
         for comment in comments_raw:
             comment_dict = dict(comment)
-            comment_dict['content'], _ = moderate_content(comment_dict['content'])
+            original_comment_content = comment_dict['content']
+            comment_dict['content'], _ = moderate_with_appeal(original_comment_content, 'comment', comment_dict['id'])
+            comment_dict['was_censored'] = (comment_dict['content'] != original_comment_content)
+            comment_dict['has_appeal'] = has_appeal('comment', comment_dict['id'])
             comments_moderated.append(comment_dict)
+
         posts_data.append({
             'post': post_dict,
             'reactions': reactions,
@@ -832,6 +853,25 @@ def admin_dashboard():
         comments.append(comment_dict)
 
     comments.sort(key=lambda x: x['risk_score'], reverse=True) # Sort after fetching and scoring
+        # --- Appeals Tab Data (Design Claim Ch. 4: appeal procedures) ---
+    ensure_appeals_table()
+    appeals_raw = query_db('''
+        SELECT a.id, a.user_id, a.content_type, a.content_id, a.reason, a.status,
+               a.admin_response, a.created_at, a.resolved_at, u.username
+        FROM appeals a JOIN users u ON a.user_id = u.id
+        ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END, a.created_at DESC
+    ''')
+    appeals = []
+    for appeal_raw in appeals_raw:
+        appeal = dict(appeal_raw)
+        table = 'posts' if appeal['content_type'] == 'post' else 'comments'
+        item = query_db(f'SELECT content FROM {table} WHERE id = ?', (appeal['content_id'],), one=True)
+        appeal['original_content'] = item['content'] if item else '(content deleted)'
+        # Show what the automated system did with it, so the decision is transparent
+        appeal['moderated_content'], appeal['content_score'] = moderate_content(appeal['original_content'])
+        appeals.append(appeal)
+
+    pending_appeals_count = sum(1 for a in appeals if a['status'] == 'pending')
 
 
     return render_template('admin.html.j2', 
@@ -858,6 +898,8 @@ def admin_dashboard():
                            comments_has_prev=(comments_page > 1),
 
                            current_tab=current_tab,
+                           appeals=appeals,
+                           pending_appeals_count=pending_appeals_count,
                            PAGE_SIZE=PAGE_SIZE)
 
 
@@ -910,6 +952,169 @@ def admin_delete_comment(comment_id):
 def rules():
     return render_template('rules.html.j2')
 
+# Design Claim (Chapter 4 - Regulating Behavior in Online Communities):
+# "Consistently applied moderation criteria, a chance to argue one's case, and
+#  appeal procedures increase the legitimacy and thus the effectiveness of
+#  moderation decisions."
+#
+# Implemented as an appeal procedure: when a user's own post or comment has been
+# censored by the automated moderation system, they can submit a written appeal.
+# An administrator reviews each appeal in the admin dashboard and either
+# approves it (the original content is restored and shown uncensored) or rejects
+# it with a written explanation. Users can track the status of their appeals.
+
+
+def ensure_appeals_table():
+    """
+    Creates the 'appeals' table if it does not exist yet, so the feature also
+    works on a fresh copy of the database without a manual migration step.
+    """
+    db = get_db()
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS appeals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            content_type TEXT NOT NULL,       -- 'post' or 'comment'
+            content_id INTEGER NOT NULL,
+            reason TEXT NOT NULL,             -- the user's own argument
+            status TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | rejected
+            admin_response TEXT,              -- the moderator's explanation
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            resolved_at TIMESTAMP
+        )
+    ''')
+    db.commit()
+
+
+def is_appeal_approved(content_type, content_id):
+    """Returns True if an approved appeal exists for this post/comment."""
+    ensure_appeals_table()
+    row = query_db(
+        "SELECT 1 FROM appeals WHERE content_type = ? AND content_id = ? AND status = 'approved'",
+        (content_type, content_id), one=True
+    )
+    return row is not None
+
+
+def has_appeal(content_type, content_id):
+    """Returns the status of an existing appeal for this content, or None."""
+    ensure_appeals_table()
+    row = query_db(
+        'SELECT status FROM appeals WHERE content_type = ? AND content_id = ?',
+        (content_type, content_id), one=True
+    )
+    return row['status'] if row else None
+
+
+def moderate_with_appeal(content, content_type, content_id):
+    """
+    Wrapper around moderate_content() that respects approved appeals.
+    If a moderator has approved an appeal for this piece of content, the original
+    (uncensored) text is shown and the score is reset to 0.0 - the moderation
+    decision has been formally overturned.
+    """
+    if is_appeal_approved(content_type, content_id):
+        return content, 0.0
+    return moderate_content(content)
+
+
+@app.route('/appeals/new/<content_type>/<int:content_id>', methods=['POST'])
+def submit_appeal(content_type, content_id):
+    """Lets the author of a censored post or comment argue their case."""
+    user_id = session.get('user_id')
+    if not user_id:
+        flash('You must be logged in to appeal a moderation decision.', 'danger')
+        return redirect(url_for('login'))
+
+    if content_type not in ('post', 'comment'):
+        flash('Invalid appeal type.', 'danger')
+        return redirect(url_for('feed'))
+
+    ensure_appeals_table()
+
+    # Security check: users may only appeal their own content
+    table = 'posts' if content_type == 'post' else 'comments'
+    item = query_db(f'SELECT user_id FROM {table} WHERE id = ?', (content_id,), one=True)
+    if not item:
+        flash('That content no longer exists.', 'danger')
+        return redirect(url_for('feed'))
+    if item['user_id'] != user_id:
+        flash('You can only appeal moderation decisions on your own content.', 'danger')
+        return redirect(request.referrer or url_for('feed'))
+
+    # Prevent duplicate appeals for the same piece of content
+    existing = query_db(
+        'SELECT id, status FROM appeals WHERE content_type = ? AND content_id = ?',
+        (content_type, content_id), one=True
+    )
+    if existing:
+        flash(f'You have already appealed this {content_type} (status: {existing["status"]}).', 'info')
+        return redirect(url_for('my_appeals'))
+
+    reason = (request.form.get('reason') or '').strip()
+    if not reason:
+        flash('Please explain why you think this moderation decision was wrong.', 'warning')
+        return redirect(request.referrer or url_for('feed'))
+
+    db = get_db()
+    db.execute(
+        'INSERT INTO appeals (user_id, content_type, content_id, reason) VALUES (?, ?, ?, ?)',
+        (user_id, content_type, content_id, reason)
+    )
+    db.commit()
+    flash('Your appeal has been submitted and will be reviewed by a moderator.', 'success')
+    return redirect(url_for('my_appeals'))
+
+
+@app.route('/appeals')
+def my_appeals():
+    """Shows the current user their own appeals and how they were decided."""
+    user_id = session.get('user_id')
+    if not user_id:
+        flash('You must be logged in to view your appeals.', 'danger')
+        return redirect(url_for('login'))
+
+    ensure_appeals_table()
+    appeals_raw = query_db('''
+        SELECT id, content_type, content_id, reason, status, admin_response, created_at, resolved_at
+        FROM appeals WHERE user_id = ? ORDER BY created_at DESC
+    ''', (user_id,))
+
+    appeals = []
+    for appeal_raw in appeals_raw:
+        appeal = dict(appeal_raw)
+        # Fetch the original content so the user can see what they appealed
+        table = 'posts' if appeal['content_type'] == 'post' else 'comments'
+        item = query_db(f'SELECT content FROM {table} WHERE id = ?', (appeal['content_id'],), one=True)
+        appeal['original_content'] = item['content'] if item else '(content deleted)'
+        appeals.append(appeal)
+
+    return render_template('appeals.html.j2', appeals=appeals)
+
+
+@app.route('/admin/appeals/<int:appeal_id>/<decision>', methods=['POST'])
+def resolve_appeal(appeal_id, decision):
+    """Lets an administrator approve or reject an appeal, with a written reason."""
+    if session.get('username') != 'admin':
+        flash('You do not have permission to perform this action.', 'danger')
+        return redirect(url_for('feed'))
+
+    if decision not in ('approved', 'rejected'):
+        flash('Invalid decision.', 'danger')
+        return redirect(url_for('admin_dashboard', tab='appeals'))
+
+    ensure_appeals_table()
+    admin_response = (request.form.get('admin_response') or '').strip()
+
+    db = get_db()
+    db.execute('''
+        UPDATE appeals SET status = ?, admin_response = ?, resolved_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    ''', (decision, admin_response, appeal_id))
+    db.commit()
+
+    flash(f'Appeal {appeal_id} has been {decision}.', 'success')
+    return redirect(url_for('admin_dashboard', tab='appeals'))
 
 @app.route('/leaderboard')
 def leaderboard():
@@ -973,10 +1178,42 @@ def user_risk_analysis(user_id):
             password: admin
         Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
-    
-    score = 0
+    user = query_db('SELECT profile, created_at FROM users WHERE id = ?', (user_id,), one=True)
+    if not user:
+        return 0.0
 
-    return score;
+    # Step 1: Profile Score
+    _, profile_score = moderate_content(user['profile'] or '')
+
+    # Step 2: Post Score (average Content Score across all of the user's posts)
+    posts = query_db('SELECT content FROM posts WHERE user_id = ?', (user_id,))
+    if posts:
+        average_post_score = sum(moderate_content(p['content'])[1] for p in posts) / len(posts)
+    else:
+        average_post_score = 0.0
+
+    # Step 3: Comment Score (average Content Score across all of the user's comments)
+    comments = query_db('SELECT content FROM comments WHERE user_id = ?', (user_id,))
+    if comments:
+        average_comment_score = sum(moderate_content(c['content'])[1] for c in comments) / len(comments)
+    else:
+        average_comment_score = 0.0
+
+    # Step 4: Combine Scores
+    content_risk_score = (profile_score * 1) + (average_post_score * 3) + (average_comment_score * 1)
+
+     # Step 5: Apply Age Multiplier
+    account_age_days = (datetime.utcnow() - user['created_at']).days
+    if account_age_days < 7:
+        user_risk_score = content_risk_score * 1.5
+    elif account_age_days < 30:
+        user_risk_score = content_risk_score * 1.2
+    else:
+        user_risk_score = content_risk_score
+
+    # Step 6: Final Capping
+    return min(user_risk_score, 5.0)
+    
 
     
 # Assignment 2.1
@@ -996,10 +1233,41 @@ def moderate_content(content):
             password: admin
     Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
+    if not content:
+        return content, 0.0
 
+    # ----- Stage 1.1: Severe Violation Checks -----
+    # Rule 1.1.1: Tier 1 words -> case-insensitive, whole-word match
+    if TIER1_PATTERN.search(content):
+        return '[content removed due to severe violation]', 5.0
+
+    # Rule 1.1.2: Tier 2 phrases -> case-insensitive, whole-phrase match
+    if TIER2_PATTERN.search(content):
+        return '[content removed due to spam/scam policy]', 5.0
+
+    # ----- Stage 1.2: Scored Violations & Filtering -----
     moderated_content = content
-    score = 0
-    
+    score = 0.0
+
+    # Rule 1.2.1: Tier 3 words -> replaced with asterisks of equal length, +2.0 each
+    tier3_matches = TIER3_PATTERN.findall(moderated_content)
+    if tier3_matches:
+        score += 2.0 * len(tier3_matches)
+        moderated_content = TIER3_PATTERN.sub(lambda m: '*' * len(m.group(0)), moderated_content)
+
+    # Rule 1.2.2: External links -> replaced with '[link removed]', +2.0 each
+    urls = URL_PATTERN.findall(moderated_content)
+    if urls:
+        score += 2.0 * len(urls)
+        moderated_content = URL_PATTERN.sub('[link removed]', moderated_content)
+
+    # Rule 1.2.3: Excessive capitalization -> flat +0.5, content is not modified
+    alpha_chars = [c for c in moderated_content if c.isalpha()]
+    if len(alpha_chars) > 15:
+        upper_ratio = sum(1 for c in alpha_chars if c.isupper()) / len(alpha_chars)
+        if upper_ratio > 0.7:
+            score += 0.5
+
     return moderated_content, score
 
 # Coding Assignment #3

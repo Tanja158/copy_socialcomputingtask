@@ -1,0 +1,52 @@
+{% extends "base.html.j2" %}
+{% block content %}
+
+{# Design Claim (Ch. 4): giving users a chance to argue their case and see how
+   moderation decisions were made increases the legitimacy of moderation. #}
+
+<h2 class="text-center border-bottom pb-2 mb-4"><span>My Appeals</span></h2>
+<p class="text-center text-muted mb-4">
+  If the automated moderation system censored your content, you can appeal the decision here.
+  A moderator reviews every appeal and gives a written reason for their decision.
+</p>
+
+<div class="col-md-8 mx-auto">
+  {% for appeal in appeals %}
+  <div class="card mb-3 shadow-sm">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <h6 class="mb-0 text-muted">
+          Appeal #{{ appeal.id }} &middot; {{ appeal.content_type|capitalize }} {{ appeal.content_id }}
+        </h6>
+        {% if appeal.status == 'approved' %}
+          <span class="badge bg-success">Approved</span>
+        {% elif appeal.status == 'rejected' %}
+          <span class="badge bg-danger">Rejected</span>
+        {% else %}
+          <span class="badge bg-secondary">Pending review</span>
+        {% endif %}
+      </div>
+
+      <p class="mb-1"><strong>Your content:</strong></p>
+      <p class="border-start border-3 ps-2 text-muted small">{{ appeal.original_content }}</p>
+
+      <p class="mb-1"><strong>Your argument:</strong></p>
+      <p class="border-start border-3 ps-2 small">{{ appeal.reason }}</p>
+
+      {% if appeal.admin_response %}
+      <p class="mb-1"><strong>Moderator's reason:</strong></p>
+      <p class="border-start border-3 border-primary ps-2 small">{{ appeal.admin_response }}</p>
+      {% endif %}
+
+      <small class="text-muted">
+        Submitted {{ appeal.created_at|datetimeformat }}
+        {% if appeal.resolved_at %} &middot; Resolved {{ appeal.resolved_at|datetimeformat }}{% endif %}
+      </small>
+    </div>
+  </div>
+  {% else %}
+  <p class="text-center text-muted">You have not submitted any appeals.</p>
+  {% endfor %}
+</div>
+
+{% endblock %}
