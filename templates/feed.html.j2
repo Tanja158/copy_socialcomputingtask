@@ -22,6 +22,46 @@
 </div>
 {% endif %}
 
+{% if show_intro_prompt %}
+<!-- Design Claim (Ch. 5, Retention 3): newcomers are encouraged to reveal
+     themselves publicly, which gives old-timers a basis for conversation. -->
+<div class="col-md-8 mx-auto mb-4">
+  <div class="alert alert-info d-flex justify-content-between align-items-center mb-0">
+    <span>You have not introduced yourself yet. Tell the community who you are.</span>
+    <a href="{{ url_for('introductions') }}" class="btn btn-sm btn-primary text-nowrap ms-3">Introduce yourself</a>
+  </div>
+</div>
+{% endif %}
+
+{% if new_members %}
+<!-- Design Claim (Ch. 5, Retention 2): showing who recently joined makes early
+     friendly interaction between newcomers and existing members possible. -->
+<div class="col-md-8 mx-auto mb-4">
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="card-title mb-0">New members</h5>
+        <a href="{{ url_for('introductions') }}" class="btn btn-sm btn-light">Say hello</a>
+      </div>
+      {% for member in new_members %}
+      <div class="d-flex align-items-center mb-2">
+        <div class="activity-widget-avatar me-2" style="background-color: {{ loop_color(member.id) }};">
+          {{ member.username[0]|upper }}
+        </div>
+        <div>
+          <a href="/u/{{ member.username }}" class="fw-bold text-decoration-none">{{ member.username }}</a>
+          {% if member.is_newcomer %}<span class="badge bg-success ms-1">New</span>{% endif %}
+          <div class="text-muted small">Joined {{ member.created_at|datetimeformat }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+
+
 {% if session.get('user_id') %}
 <!-- Design Claim (Commitment): "Displaying photos and information about
      individual members and their recent activities will promote bond-based

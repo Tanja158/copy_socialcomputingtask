@@ -1,0 +1,103 @@
+{% extends "base.html.j2" %}
+{% block content %}
+{% from "macros/user_macros.html.j2" import user_display %}
+
+{# Design Claim 1 (Ch. 5, Retention 3): a public introduction thread gives
+   old-timers a basis for starting a conversation with newcomers.
+   Design Claim 2 (Ch. 5, Retention 2): members can greet newcomers with a
+   friendly message soon after they joined. #}
+
+<h2 class="text-center border-bottom pb-2 mb-4"><span>Introductions</span></h2>
+<p class="text-center text-muted mb-4">
+  New members introduce themselves here, and everyone else can say hello.
+</p>
+
+<div class="col-md-8 mx-auto">
+
+  <!-- Recently joined members -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Recently joined</h5>
+      {% for member in new_members %}
+      <div class="d-flex align-items-center mb-2">
+        <div class="activity-widget-avatar me-2" style="background-color: {{ loop_color(member.id) }};">
+          {{ member.username[0]|upper }}
+        </div>
+        <div>
+          <a href="/u/{{ member.username }}" class="fw-bold text-decoration-none">{{ member.username }}</a>
+          {% if member.is_newcomer %}<span class="badge bg-success ms-1">New</span>{% endif %}
+          <div class="text-muted small">Joined {{ member.created_at|datetimeformat }}</div>
+        </div>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">No members yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Write your own introduction -->
+  {% if session.get('user_id') and not already_introduced %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Introduce yourself</h5>
+      <p class="text-muted small">
+        Tell the community who you are and what you are interested in. Other members
+        can then welcome you and start a conversation.
+      </p>
+      <form action="{{ url_for('add_introduction') }}" method="POST">
+        <div class="mb-3">
+          <textarea class="form-control" name="content" rows="3"
+                    placeholder="Hi, I'm new here. I'm interested in..." required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary float-end">Post introduction</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- The introduction thread itself -->
+  {% for intro in intros %}
+  <div class="card mb-3 shadow-sm">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start">
+        <h5 class="mb-1">
+          <a href="/u/{{ intro.username }}" class="text-decoration-none">{{ user_display(intro.username) }}</a>
+          {% if intro.is_newcomer %}<span class="badge bg-success">New member</span>{% endif %}
+        </h5>
+        <small class="text-muted">{{ intro.created_at|datetimeformat }}</small>
+      </div>
+      {% if intro.location %}<div class="text-muted small mb-2">{{ intro.location }}</div>{% endif %}
+
+      <p class="mb-3">{{ intro.content }}</p>
+
+      <!-- Welcome messages from existing members -->
+      {% if intro.welcomes %}
+      <ul class="list-group list-group-flush mb-2">
+        {% for welcome in intro.welcomes %}
+        <li class="list-group-item px-0 py-1 border-0">
+          <span class="badge bg-light text-dark">👋</span>
+          <strong>{{ welcome.username }}:</strong>
+          <span class="small">{{ welcome.message }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if intro.can_welcome %}
+      <form action="{{ url_for('welcome_newcomer', introduction_id=intro.id) }}" method="POST"
+            class="d-flex gap-2 mt-2">
+        <input type="text" class="form-control form-control-sm" name="message"
+               placeholder="Say hello to {{ intro.username }}...">
+        <button type="submit" class="btn btn-sm btn-success text-nowrap">Welcome</button>
+      </form>
+      {% elif session.get('user_id') and session.get('user_id') != intro.user_id %}
+      <span class="text-muted small">You already welcomed this member.</span>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <p class="text-center text-muted">Nobody has introduced themselves yet.</p>
+  {% endfor %}
+
+</div>
+{% endblock %}
